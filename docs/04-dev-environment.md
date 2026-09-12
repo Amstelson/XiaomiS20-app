@@ -101,11 +101,18 @@ Before any of the above matters, one script answers whether the plan holds. It s
 5. Poll `vacuum-position` (7/p4) for 60 s at 5 Hz and report the true update rate and jitter.
 6. With the robot in open floor: enter remote mode, issue a single `-up`, observe whether it
    drives continuously or nudges, `stop-remote`, `exit-remote`. Measure command latency.
+6b. **Drive it at the problem threshold under remote control.** This is the decisive
+   experiment. The robot currently "hits it and turns away", so the question is whether that
+   refusal is the *navigation planner* declining the obstacle — in which case remote mode
+   bypasses it and the feature works — or the *bumper/cliff firmware*, which remote mode will
+   not override. Try both directions, and try an oblique entry, and record what happens.
+   Have a hand ready to catch it.
 7. Start a clean, pause it, enter and exit remote mode, `continue-sweep`, and confirm the
    clean resumes rather than restarting.
 
-Steps 4, 5, 6 and 7 resolve every **[UNVERIFIED]** item that the design depends on. Nothing
-else should be built until they have answers.
+Steps 4, 5, 6, 6b and 7 resolve every **[UNVERIFIED]** item that the design depends on.
+Nothing else should be built until they have answers — and 6b in particular determines
+whether Gate Assist is a strong feature or a modest one.
 
 ## Path to iOS
 

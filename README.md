@@ -16,10 +16,14 @@ built because the stock Xiaomi Home app is unreliable and awkward for map work.
 
 Planning. No code yet. See `docs/`.
 
+**Shape:** standalone Python hub in an LXC container on Proxmox, thin web client now, React
+Native on iOS later. No Home Assistant.
+
 ## Documents
 
 | | |
 |---|---|
+| [`docs/00-decisions.md`](docs/00-decisions.md) | Settled decisions, Proxmox deployment notes, observed threshold behaviour |
 | [`docs/01-protocol-reference.md`](docs/01-protocol-reference.md) | Device, transports, the map pipeline, full control surface, and what does not exist |
 | [`docs/02-architecture.md`](docs/02-architecture.md) | Hub + thin-client design and why |
 | [`docs/03-gate-assist.md`](docs/03-gate-assist.md) | The threshold-crossing feature, honestly scoped |

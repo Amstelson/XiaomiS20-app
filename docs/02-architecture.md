@@ -13,7 +13,7 @@ So:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  HUB  (always-on: Raspberry Pi, NAS container, spare Mac)     │
+│  HUB  (LXC container on Proxmox; Pi as fallback / field node) │
 │                                                               │
 │   miio transport ─┐                                           │
 │   cloud client  ──┼─→ Device Manager ─→ State Store (SQLite)  │
@@ -44,8 +44,14 @@ Phase 1 is thrown away when you move to iOS.
   have not yet successfully decoded once is the wrong order of operations.
 - `protobuf`, `pycryptodome`, `Pillow`/`numpy` are all one `pip install` away.
 
-FastAPI + `uvicorn` for the API, `asyncio` throughout, SQLite for state. Deploy as a Docker
-container so the Pi/NAS story is trivial.
+FastAPI + `uvicorn` for the API, `asyncio` throughout, SQLite for state. Packaged as a Docker
+image, deployed into an unprivileged LXC container on Proxmox.
+
+Proxmox matters here for one reason beyond convenience: **snapshots**. This is software that
+drives a physical machine around your home, and being able to roll the hub back to the last
+known-good state in one click is worth real money during Phase 4. Networking must be
+**bridged, not NAT** — the miIO handshake is UDP on the robot's L2 subnet. See
+`00-decisions.md` for the details.
 
 ## Module layout
 

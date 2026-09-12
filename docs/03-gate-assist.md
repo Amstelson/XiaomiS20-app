@@ -13,7 +13,7 @@ software fixes it and a small bevelled ramp is the honest answer.
 **What we can do is change how it approaches, and refuse to give up.** Threshold failures on
 these robots are rarely "not enough power at the limit" — they are:
 
-- hitting the lip at an angle, so one wheel climbs and the other does not, and it slews off;
+- hitting the lip at the wrong geometry, so it either slews off or grounds out on the crest;
 - hitting a *particular spot* on the threshold that happens to be higher, worn, or has a
   screw head, when 20 cm to the left it would go over fine;
 - approaching from a standstill with no run-up because the bumper triggered a slow-down;
@@ -23,6 +23,49 @@ Every one of those is a navigation problem, and navigation is exactly what the r
 actions give us. The realistic outcome is **converting "fails sometimes and abandons the
 room" into "crosses reliably, occasionally on the second attempt"** — which is what you asked
 for. Expect to measure this, not assume it.
+
+## 1a. The observed failure taxonomy — and why it drives the design
+
+The threshold in question fails in **two different ways**, and **only in one direction**:
+
+| Mode | What it looks like | What it means physically |
+|---|---|---|
+| **Beach** | Rides up, strands on the crest, wheels spinning | High-centring. The chassis or the mop assembly grounds out on top before the drive wheels regain purchase. |
+| **Refusal** | Hits the lip and turns away without committing | The robot's own bumper/cliff logic aborts the attempt before the climb starts. |
+
+Directional asymmetry means one side of the threshold has a steeper or squarer lip than the
+other — which is exactly the kind of thing per-direction learning captures for free.
+
+Three consequences, and they shape everything below:
+
+**1. The two modes want partially opposite remedies.** A refusal is helped by a square,
+perpendicular, committed approach with run-up. A beach is often helped by the *opposite* —
+a slightly oblique entry, so the wheels meet the lip sequentially and the robot pitches over
+it rather than lifting flat and grounding out in the middle. A single hand-tuned rule cannot
+serve both. This is the strongest argument for the learning approach: record which mode
+occurred, and let per-spot, per-direction statistics discover which entry geometry works
+*here*, rather than encoding a guess.
+
+**2. Outcomes must be typed, not boolean.** `crossed | beached | refused | faulted` — not
+`success | failure`. A beach and a refusal at the same spot are different evidence and must
+update different arms of the policy. This is a schema decision that is painful to retrofit,
+so it goes in from the first commit.
+
+**3. Beaching needs an escape routine, not persistence.** When high-centred, continuing to
+drive forward spins the wheels against no traction. It achieves nothing, and on this model it
+is a plausible route to the reported mop-bracket detachment, as well as needless drive-motor
+load. So:
+
+> **Beach detection is a hard interrupt.** If the pose is straddling the gate line and static
+> for more than ~2 s, stop driving forward immediately, reverse out along the entry vector,
+> and only then consider another attempt at a different spot.
+
+Discriminating the two modes is straightforward with the geometry we already have — take the
+signed distance from the gate line:
+
+- **refusal** — motion stops while the signed distance is still clearly negative (short of
+  the line), usually followed by a heading change;
+- **beach** — signed distance sits near zero (straddling) and the pose freezes.
 
 ## 2. The primitives we have
 
@@ -62,12 +105,19 @@ class Gate:
     approach_distance: float    # default 0.45 m — where the run-up starts
     clearance: float            # default 0.20 m — how far past to call it crossed
     max_attempts: int           # default 3
-    strategy: Strategy          # PERPENDICULAR_RUNUP | SPOT_SEARCH | NUDGE
+    obliquity_set: list[float]  # entry angles to explore, e.g. [0°, ±12°, ±22°]
+    hard_direction: int | None  # set once learned; the side that actually fails
     enabled: bool
 ```
 
 Crossing points are sampled along `a→b`, inset from both ends so the robot never tries to
-climb at a door jamb. Each sample carries a running success record.
+climb at a door jamb. The policy's arms are the cross product
+`(spot × direction × obliquity)`; each carries a running record, typed by outcome.
+
+Because this threshold only fails in one direction, the engine should learn to stop
+intervening in the easy direction entirely — a gate that succeeds unassisted 20 times running
+in one direction drops to passive monitoring that way, and keeps its attempt budget for the
+side that needs it.
 
 ## 4. The maneuver
 
@@ -79,21 +129,24 @@ climb at a door jamb. Each sample carries a running success record.
                                      ↓
   1. PAUSE            2/A6, confirm status → 5 Paused
   2. SNAPSHOT         record pose, suction, water, mop type
-  3. PREPARE          mop water → Off (2/p9 = 0); suction → Full Speed (2/p8 = 4)
+  3. PREPARE          mop water → Off (2/p9 = 0); suction → Full Speed (2/p8 = 4);
+                      optionally Sweep Mop Type → Sweep (2/p3 = 1) — see §6, this is the
+                      lever most likely to matter for beaching
   4. ENTER REMOTE     6/A2, confirm status → 7 Remote
-  5. SELECT SPOT      best-ranked crossing point for this direction
+  5. SELECT ARM       best-ranked (spot, obliquity) for this direction
   6. BACK OFF         drive to approach_distance behind the gate, normal to a→b
-  7. ALIGN            rotate until |heading − gate_normal| < 5°
+  7. ALIGN            rotate to the arm's target heading (gate normal ± obliquity), ±5°
   8. DRIVE            issue -up repeatedly at the command refresh rate
-  9. EVALUATE         crossed if signed distance past the line > clearance
-                        success → record, go to 11
-                        no progress for 3 s → abort this attempt
- 10. RETRY            next-best spot, up to max_attempts; then give up and flag the gate
- 11. RESTORE          exit-remote (6/A14), restore settings, continue-sweep (6/A1)
+  9. EVALUATE         signed distance past the line > clearance   → CROSSED
+                      static & straddling the line (> 2 s)        → BEACHED, escape now
+                      static & short of the line  (> 3 s)         → REFUSED
+ 10. ESCAPE           on BEACHED: stop, reverse along the entry vector until clear
+ 11. RETRY            next-best arm, up to max_attempts; then give up and flag the gate
+ 12. RESTORE          exit-remote (6/A14), restore settings, continue-sweep (6/A1)
 ```
 
 Every step is guarded. The engine holds a hard watchdog: if anything takes longer than a
-configured ceiling, or the robot reports a fault, it unconditionally runs step 11 and reports
+configured ceiling, or the robot reports a fault, it unconditionally runs step 12 and reports
 failure. **The robot must never be left parked in remote mode by a crashed engine** — that
 is the single worst failure mode of this design, so the restore path is written first and
 tested with injected faults.
@@ -116,15 +169,20 @@ CREATE TABLE crossing_attempts (
   gate_id TEXT, spot_index INTEGER, direction INTEGER,
   approach_heading_err REAL, entry_speed_proxy REAL,
   mop_water INTEGER, suction INTEGER,
-  outcome TEXT,             -- crossed | stalled | aborted | fault
+  entry_obliquity REAL,     -- 0 = square to the lip; the beach/refusal trade-off
+  outcome TEXT,             -- crossed | beached | refused | faulted
   duration_ms INTEGER, ts INTEGER
 );
 ```
 
 Spot ranking is a Beta posterior over success rate (Thompson sampling, a few lines of code —
-no ML stack). The first few runs explore the threshold; after that the engine goes straight
-to the spot that actually works, in the direction that actually works. Thresholds are not
-uniform, and this is precisely the knowledge the stock firmware throws away after every run.
+no ML stack). The arms are `(spot, direction, obliquity bucket)`, which is what lets the
+policy resolve the conflict in §1a empirically: if square entry keeps beaching at this
+threshold, the oblique arms win on their own, without anyone deciding in advance.
+
+The first few runs explore the threshold; after that the engine goes straight to the geometry
+that actually works, in the direction that actually needs help. Thresholds are not uniform,
+and this is precisely the knowledge the stock firmware throws away after every run.
 
 Secondary levers worth A/B-ing once the harness exists, since each is one property write:
 mop water off vs. on, suction level, and `Sweep Mop Type` (2/p3) set to `1 Sweep` — if that
