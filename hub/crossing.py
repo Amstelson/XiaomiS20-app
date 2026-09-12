@@ -208,12 +208,16 @@ class CrossingEngine:
     def _remote_mode(self, attempt: Attempt) -> Iterator[None]:
         """Own remote mode for the duration, and always give it back."""
         self.vac.enter_remote()
-        self._sleep(0.4)
+        # Give it a moment, but do not insist: a docked robot keeps reporting
+        # `charged` until it is actually asked to move, so treating a
+        # non-REMOTE status as refusal aborts a maneuver that would have
+        # worked. Whether the robot actually moves is checked by the drive
+        # phase, which is the honest test anyway.
+        self._sleep(0.6)
         status = self.vac.status()
         if status != Status.REMOTE:
-            self.vac.exit_remote()
-            raise CrossingAborted(
-                f"robot did not enter remote mode (status={self.vac.status_name()})"
+            attempt.notes.append(
+                f"status still {self.vac.status_name()} after entering remote mode"
             )
         try:
             yield

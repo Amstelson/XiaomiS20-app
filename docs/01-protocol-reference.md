@@ -110,16 +110,39 @@ mapKeyHex  = md5(aeskey).hexdigest()                       # 32 hex chars
 
 `wifi_sn` is a required key input and it is the single most likely thing to break.
 
-- The reference ijai implementation reads it from **siid 7 / piid 45**, splits on `,` and
-  takes index 11. **That piid is not in the published `b108gl` spec** (service 7 stops at
-  piid 9), so on the S20+ it must be sourced elsewhere — most likely the
-  `get-system-info` action (**siid 6 / aiid 16**, returns `common-params`) or
-  `siid 1 / piid 5` (Serial Number). **[UNVERIFIED — Phase 0 probe target #1]**
-- On the S20 (`d106gl`) the value has a **non-standard format containing a slash**, e.g.
-  `57054/B2AE7F5NE03300` — 20 characters, not alphanumeric. Reference implementations
-  hardcode an 18-char `isalnum()` check and reject it. Once the raw value is passed through
-  unmodified, maps decrypt correctly. **Do not sanitise this string.** Accept 10–25 chars,
-  allow `/`, and feed it to the KDF byte-for-byte.
+- **CONFIRMED on hardware: it is the Serial Number, `siid 1 / piid 5`.** A real S20+
+  returns `54785/DUAA8F4WB06957` there. The reference ijai implementation reads
+  7/p45 instead, which does not exist on this model — service 7 stops at piid 9 —
+  and `get-system-info` (6/A16) returns only CPU and memory stats, no serial.
+- The value has a **non-standard format containing a slash** — 20 characters, not
+  alphanumeric. Reference implementations hardcode an 18-char `isalnum()` check and
+  reject it. Once the raw value is passed through unmodified, maps decrypt correctly.
+  **Do not sanitise this string.** Accept 10–25 chars, allow `/`, and feed it to the
+  KDF byte-for-byte.
+
+### 3d. Confirmed hardware readings
+
+From a real S20+ on firmware `0208` (build 20250415):
+
+| Address | Value | Notes |
+|---|---|---|
+| `1/5` | `54785/DUAA8F4WB06957` | **the `wifi_sn` for map decryption** |
+| `7/1` | `{"index":...,"obj_name":"<owner>/<did>/3"}` | obj_name is already the full path — use it as-is rather than rebuilding it |
+| `7/4` | `{"position":[6,170,1551]}` | three ints; layout and units still being confirmed on a moving robot |
+| `2/11` | `{"forbidden_regions":[{"id":0,...,"fb_point":[-3335,1865,...]}]}` | **millimetres** |
+| `2/12` | `{"restricted_walls":[{"id":0,"wall_points":[-5345,2920,-5345,-1490]}]}` | millimetres |
+| `6/2` | `{"version":"0208","build_time":"20250415.054556"}` | |
+| `6/A16` | `{"cpu":"8%","total_mem":119,"used_mem":90}` | no serial here |
+
+The map frame is millimetres, which is the strongest clue about `7/4`'s units — but
+the field layout cannot be settled from a stationary robot, so `tools/jog.py` records
+every raw sample for exactly that purpose.
+
+### 3e. Remote mode does not report itself immediately
+
+A docked robot announces "remote control start" and accepts direction commands while
+still reporting `8 Charged` rather than `7 Remote`. Treating that as a refusal aborts
+a maneuver that would have worked — so status is noted, never used as a gate.
 
 ### 3c. `RobotMap` protobuf — fields that matter
 

@@ -161,7 +161,9 @@ class SimVacuum:
         self.settings = {"suction": 2, "water": 2, "sweep_mop_type": 3}
         self.calls: list[str] = []
         self.resumed = False
-        #: Set to make enter_remote fail, to test the refusal path.
+        #: When False the robot reports remote mode but ignores the direction
+        #: commands -- modelling a firmware that accepts the action and then
+        #: does nothing, which is indistinguishable from refusal at the wire.
         self.allow_remote = True
 
     def _record(self, name: str) -> None:
@@ -219,17 +221,21 @@ class SimVacuum:
     def in_remote_mode(self) -> bool:
         return self.status_value == Status.REMOTE
 
+    def _drive(self, command: str) -> None:
+        if self.allow_remote:
+            self.robot.command = command
+
     def remote_forward(self):
-        self.robot.command = "forward"
+        self._drive("forward")
 
     def remote_back(self):
-        self.robot.command = "back"
+        self._drive("back")
 
     def remote_left(self):
-        self.robot.command = "left"
+        self._drive("left")
 
     def remote_right(self):
-        self.robot.command = "right"
+        self._drive("right")
 
     def remote_halt(self):
         self.robot.command = "halt"

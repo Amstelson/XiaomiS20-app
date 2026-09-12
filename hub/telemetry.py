@@ -82,8 +82,18 @@ def _from_mapping(data: dict) -> tuple[float, float, float] | None:
     """Pull x/y/heading out of a JSON object, whatever the keys are called."""
     lowered = {str(k).lower(): v for k, v in data.items()}
     for nest in ("pose", "position", "point", "current", "curpos"):
-        if nest in lowered and isinstance(lowered[nest], dict):
-            inner = _from_mapping(lowered[nest])
+        if nest not in lowered:
+            continue
+        nested = lowered[nest]
+        if isinstance(nested, dict):
+            inner = _from_mapping(nested)
+            if inner is not None:
+                return inner
+        # The S20+ emits {"position": [x, y, angle]} -- a bare list under the
+        # key, not an object.
+        if isinstance(nested, (list, tuple)):
+            numbers = [n for n in (_coerce(v) for v in nested) if n is not None]
+            inner = _from_numbers(numbers)
             if inner is not None:
                 return inner
 

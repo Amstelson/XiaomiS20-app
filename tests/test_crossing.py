@@ -208,13 +208,31 @@ def test_settings_changed_during_the_attempt():
     assert (int(WaterLevel.OFF), int(Suction.FULL_SPEED)) in seen
 
 
-def test_failure_to_enter_remote_mode_aborts_cleanly():
-    engine, vac, _, _ = build()
+def test_unconfirmed_remote_status_is_noted_but_not_treated_as_refusal():
+    """A docked robot reports `charged` until asked to move -- aborting there
+    would give up on a maneuver that would have worked."""
+    engine, vac, _, _ = build(min_speed=0.25)
+    original = vac.enter_remote
+
+    def enter_but_keep_reporting_charged():
+        original()
+        vac.status_value = Status.CHARGED
+
+    vac.enter_remote = enter_but_keep_reporting_charged
+    result = engine.attempt(runup=0.8)
+    assert result.outcome is Outcome.CROSSED
+    assert any("status still" in n for n in result.notes)
+
+
+def test_a_robot_that_ignores_remote_commands_fails_cleanly():
+    engine, vac, robot, _ = build()
     vac.allow_remote = False
+    before = (robot.x, robot.y)
     result = engine.attempt(runup=0.5)
-    assert result.outcome is Outcome.ABORTED
-    assert "remote mode" in " ".join(result.notes)
+    assert result.outcome in {Outcome.REFUSED, Outcome.TIMEOUT, Outcome.ABORTED}
+    assert (robot.x, robot.y) == before, "robot must not have moved"
     assert not vac.in_remote_mode()
+    assert "exit_remote" in vac.calls
 
 
 def test_resume_only_after_a_successful_crossing():

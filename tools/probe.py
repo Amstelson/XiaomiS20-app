@@ -58,6 +58,29 @@ def probe_known(t: Transport, report: dict) -> None:
     report["known_properties"] = values
 
 
+def _wifi_sn_candidates(values: dict[str, object]) -> list[tuple[str, str]]:
+    """Fields shaped like a Xiaomi wifi_sn.
+
+    The S20 family's looks like `54785/DUAA8F4WB06957` -- around 20 characters,
+    alphanumeric apart from a slash. Length and `isalnum()` checks that do not
+    allow for the slash are the classic reason map decryption fails.
+    """
+    candidates: list[tuple[str, str]] = []
+    for key, value in values.items():
+        text = str(value)
+        for field in text.replace('"', "").replace("{", "").replace("}", "").split(","):
+            field = field.strip()
+            cleaned = field.replace("/", "")
+            if (
+                10 <= len(field) <= 25
+                and cleaned.isalnum()
+                and not field.isdigit()
+                and not cleaned.isalpha()
+            ):
+                candidates.append((key, field))
+    return candidates
+
+
 def hunt_wifi_sn(t: Transport, vac: Vacuum, report: dict) -> None:
     """The map decryption key needs wifi_sn, and its home on this model is unknown.
 
@@ -87,18 +110,19 @@ def hunt_wifi_sn(t: Transport, vac: Vacuum, report: dict) -> None:
 
     report["undocumented"] = found
 
-    candidates = []
-    for key, value in found.items():
-        text = str(value)
-        for field in text.replace('"', "").split(","):
-            field = field.strip()
-            cleaned = field.replace("/", "")
-            if 10 <= len(field) <= 25 and cleaned.isalnum() and not field.isdigit():
-                candidates.append((key, field))
+    # Scan the known properties too -- on this model the serial number at 1/5
+    # carries the value, and looking only at undocumented addresses misses it.
+    searchable = dict(found)
+    for key, entry in (report.get("known_properties") or {}).items():
+        if isinstance(entry, dict) and entry.get("value") not in (None, "", 0):
+            searchable[f"{key} ({entry['name']})"] = entry["value"]
+
+    candidates = _wifi_sn_candidates(searchable)
     if candidates:
-        print("\n  Plausible wifi_sn values (note: the S20 format contains a '/'):")
+        print("\n  Plausible wifi_sn values (the S20 format contains a '/'):")
         for key, value in candidates[:15]:
-            print(f"    {key:>10}  {value}")
+            marker = "  <-- most likely" if "/" in value else ""
+            print(f"    {key:>22}  {value}{marker}")
     else:
         print("\n  No obvious candidate found -- send the full output over.")
     report["wifi_sn_candidates"] = candidates
@@ -264,7 +288,7 @@ def main() -> int:
     }
 
     probe_known(transport, report)
-    hunt_wifi_sn(transport, vac, report)
+    hunt_wifi_sn(transport, vac, report)  # depends on probe_known having run
     probe_position(transport, report, args.position_seconds)
     if args.remote_test:
         probe_remote(vac, report)

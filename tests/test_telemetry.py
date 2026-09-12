@@ -42,6 +42,19 @@ def test_json_alternate_key_names():
     assert pose.heading == pytest.approx(45.0)
 
 
+def test_position_key_holding_a_bare_list():
+    """The shape the S20+ actually emits."""
+    pose = parse_position('{"position":[6,170,1551]}')
+    assert (pose.x, pose.y) == (pytest.approx(0.06), pytest.approx(1.70))
+
+
+def test_position_list_respects_an_explicit_format():
+    fmt = PositionFormat(linear_scale=0.001, angle_in_radians=False)
+    pose = parse_position('{"position":[6,170,1551]}', fmt)
+    assert pose.x == pytest.approx(0.006)
+    assert pose.y == pytest.approx(0.170)
+
+
 def test_nested_pose_object():
     pose = parse_position('{"pose": {"x": 3.0, "y": 4.0, "phi": 0.0}, "id": 9}')
     assert (pose.x, pose.y) == (3.0, 4.0)

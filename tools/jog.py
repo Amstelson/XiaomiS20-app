@@ -16,14 +16,21 @@ Keys
     m         mark the current position (use at each end of the threshold)
     g         emit a gate definition from the last two marks
     r         reset the trip odometer
+    t         toggle between the raw position string and the odometer
 
 Marking both ends of the doorway and pressing `g` prints a ready-made gate
 block for gates.toml, so you never have to read coordinates off a map by hand.
+
+Every raw position sample is logged to fixtures/jog-<timestamp>.jsonl along
+with the command in effect. While the wire format is still unconfirmed that
+recording is the ground truth: drive a known distance, turn a known angle, and
+the log says which field is which.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import sys
 import termios
@@ -40,7 +47,7 @@ from hub.telemetry import PoseReader  # noqa: E402
 from hub.transport import Transport  # noqa: E402
 
 HELP = (
-    "w/s drive  a/d turn  space stop  m mark  g gate from marks  r reset  q quit"
+    "w/s drive  a/d turn  space stop  m mark  g gate  r reset  t raw/odo  q quit"
 )
 
 
@@ -91,6 +98,11 @@ def main() -> int:
         default=0.4,
         help="seconds between re-issuing a held direction command",
     )
+    parser.add_argument(
+        "--no-record",
+        action="store_true",
+        help="do not log raw position samples to fixtures/",
+    )
     args = parser.parse_args()
 
     try:
@@ -110,12 +122,23 @@ def main() -> int:
     print("\nEntering remote mode. The robot will respond to keys immediately.")
     print(HELP + "\n")
 
-    vac.enter_remote()
-    time.sleep(0.5)
-    if not vac.in_remote_mode():
-        print(f"Robot did not enter remote mode (status: {vac.status_name()}).")
-        vac.exit_remote()
-        return 1
+    if not vac.enter_remote_confirmed():
+        # Not an error. Docked robots keep reporting `charged` until they are
+        # actually asked to move, and the robot announces "remote control
+        # start" regardless -- so carry on and let the keys decide.
+        print(
+            f"Robot still reports '{vac.status_name()}' rather than 'remote'.\n"
+            "That is normal on the dock. Press w and watch whether it moves;\n"
+            "the status line below shows what it reports."
+        )
+
+    record = None
+    if not args.no_record:
+        fixtures = Path(__file__).resolve().parent.parent / "fixtures"
+        fixtures.mkdir(exist_ok=True)
+        record_path = fixtures / f"jog-{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
+        record = record_path.open("w")
+        print(f"Recording raw samples to {record_path.name}\n")
 
     marks: list[Point] = []
     command = "halt"
@@ -123,6 +146,10 @@ def main() -> int:
     origin: Point | None = None
     trip = 0.0
     previous: Point | None = None
+    status = "?"
+    status_checked = 0.0
+    show_raw = True
+    started_at = time.monotonic()
 
     actions = {
         "w": ("forward", vac.remote_forward),
@@ -160,6 +187,8 @@ def main() -> int:
                         emit_gate(marks, sample.pose.point)
                 elif key == "r":
                     origin, trip, previous = None, 0.0, None
+                elif key == "t":
+                    show_raw = not show_raw
 
                 # Hold the command alive; if the firmware drives continuously
                 # this is harmless, and if it nudges this keeps it moving.
@@ -168,6 +197,13 @@ def main() -> int:
                     actions_by_name = {v[0]: v[1] for v in actions.values()}
                     actions_by_name[command]()
                     last_sent = now
+
+                if now - status_checked > 2.0:
+                    try:
+                        status = vac.status_name()
+                    except Exception:  # noqa: BLE001
+                        status = "?"
+                    status_checked = now
 
                 sample = reader.read()
                 if sample:
@@ -178,19 +214,38 @@ def main() -> int:
                         trip += previous.distance_to(point)
                     previous = point
                     displacement = origin.distance_to(point)
+                    # The raw string matters while the wire format is still
+                    # being pinned down -- it is the ground truth, and the
+                    # parsed values are only an interpretation of it.
+                    if record is not None:
+                        record.write(
+                            json.dumps(
+                                {
+                                    "t": round(time.monotonic() - started_at, 3),
+                                    "cmd": command,
+                                    "raw": sample.raw,
+                                }
+                            )
+                            + "\n"
+                        )
+                    tail = f"raw={sample.raw}" if show_raw else (
+                        f"net={displacement:5.2f} path={trip:5.2f}"
+                    )
                     print(
-                        f"\r  {command:<7} "
+                        f"\r  {command:<7} [{status:<8}] "
                         f"x={sample.pose.x:+7.3f} y={sample.pose.y:+7.3f} "
-                        f"hdg={sample.pose.heading:+7.1f}deg  "
-                        f"net={displacement:5.2f}m path={trip:5.2f}m  "
-                        f"marks={len(marks)}   ",
+                        f"hdg={sample.pose.heading:+7.1f}  "
+                        f"marks={len(marks)}  {tail}          ",
                         end="",
                         flush=True,
                     )
                 else:
                     print("\r  (no position data)          ", end="", flush=True)
     finally:
-        print("\n\nReleasing remote mode...")
+        if record is not None:
+            record.close()
+            print(f"\n\nRaw samples written to {record_path}")
+        print("\nReleasing remote mode...")
         try:
             vac.remote_halt()
             time.sleep(0.2)

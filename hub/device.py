@@ -173,6 +173,26 @@ class Vacuum:
     def enter_remote(self) -> Any:
         return self.t.action(spec.REMOTE_CONTROL)
 
+    def enter_remote_confirmed(
+        self, *, timeout: float = 4.0, poll: float = 0.4
+    ) -> bool:
+        """Enter remote mode and wait for the robot to report it.
+
+        Returns whether `status` actually reached REMOTE. It often does not
+        straight away -- on the dock the robot keeps reporting `charged` until
+        it is asked to move -- so a False here means "not confirmed yet", not
+        "the command was rejected". Callers should carry on and re-check.
+        """
+        import time
+
+        self.enter_remote()
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.status() == Status.REMOTE:
+                return True
+            time.sleep(poll)
+        return False
+
     def remote_forward(self) -> Any:
         return self.t.action(spec.REMOTE_UP)
 
