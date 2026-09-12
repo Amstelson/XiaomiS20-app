@@ -37,6 +37,23 @@ The token comes from your Mi account, once, with
 `config.toml`, `gates.toml` and `fixtures/` are gitignored — they hold device
 material.
 
+## Where to run it
+
+For the experiments below, **your laptop, on the normal home Wi-Fi**. You need
+to be standing at the doorway with your hands on the keys, and there is no
+daemon yet -- every tool is a one-shot run. Move to a Proxmox LXC later, once
+there is a watcher worth running unattended. Full reasoning and the container
+recipe: [`docs/06-where-to-run.md`](docs/06-where-to-run.md).
+
+Check any candidate host first:
+
+```bash
+python3 tools/doctor.py
+```
+
+It proves the handshake and token, and measures round-trip latency -- the number
+that decides whether closed-loop control works from where you are.
+
 ## Use it in this order
 
 **1. Check we can talk to the robot at all.**
@@ -109,6 +126,7 @@ hub/
   simulator.py   differential drive + threshold model, for offline development
   gates.py       gates.toml loading
 tools/
+  doctor.py      is this host a good place to drive the robot from?
   probe.py       Phase 0 discovery
   jog.py         manual keyboard control + gate capture
   cross.py       run or calibrate a crossing
@@ -142,3 +160,4 @@ internet; use Tailscale.
 | [`docs/03-gate-assist.md`](docs/03-gate-assist.md) | The crossing maneuver, in detail |
 | [`docs/04-dev-environment.md`](docs/04-dev-environment.md) | Dev/test setup, replay harness, simulator |
 | [`docs/05-roadmap.md`](docs/05-roadmap.md) | Phased plan |
+| [`docs/06-where-to-run.md`](docs/06-where-to-run.md) | Laptop now, Proxmox LXC later, and the networking to get right |
