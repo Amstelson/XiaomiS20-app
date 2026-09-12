@@ -25,3 +25,5 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+config.toml
+gates.toml

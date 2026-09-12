@@ -1,198 +1,153 @@
 # Gate Assist — consistent threshold crossing
 
-This is the feature you actually want, and it is the one that needs the most honesty about
-what is achievable. Read section 1 before anything else.
+## 1. The actual problem
 
-## 1. What we can and cannot do
+One threshold: the doorway between the living room and the hall. Curved
+aluminium with a slight ramp.
 
-**We cannot make the robot stronger.** There is no property, action or hidden command in the
-`b108gl` spec that changes motor torque, wheel speed or suspension behaviour. Nothing at the
-app layer can raise the 20 mm rating. If the threshold is physically beyond the robot, no
-software fixes it and a small bevelled ramp is the honest answer.
+- **Hall → living room: fine.** Always has been.
+- **Living room → hall: fails.** The robot hesitates at the lip, creeps over
+  too gently, and strands halfway across.
 
-**What we can do is change how it approaches, and refuse to give up.** Threshold failures on
-these robots are rarely "not enough power at the limit" — they are:
+The decisive detail is the history. **The robot used to cross it.** It would
+meet the threshold, back off a little, build speed, and carry over on momentum —
+the correct maneuver, chosen by itself. It stopped doing that after furniture
+was built around the opening. Now it goes over too carefully and beaches.
 
-- hitting the lip at the wrong geometry, so it either slews off or grounds out on the crest;
-- hitting a *particular spot* on the threshold that happens to be higher, worn, or has a
-  screw head, when 20 cm to the left it would go over fine;
-- approaching from a standstill with no run-up because the bumper triggered a slow-down;
-- the robot making one attempt, marking it impassable, and re-routing for the rest of the run.
+So this is not a missing capability. The firmware can do it and has done it.
+Something in the new geometry suppresses the behaviour — most plausibly the
+navigation planner treating the narrowed opening as a tight space and
+derating its approach, or simply no longer having the clear run-up it used to
+take. Either way:
 
-Every one of those is a navigation problem, and navigation is exactly what the remote-control
-actions give us. The realistic outcome is **converting "fails sometimes and abandons the
-room" into "crosses reliably, occasionally on the second attempt"** — which is what you asked
-for. Expect to measure this, not assume it.
+> **The job is not to invent a maneuver. It is to execute the maneuver the
+> robot has stopped choosing.**
 
-## 1a. The observed failure taxonomy — and why it drives the design
+That is a much easier problem than the general one, and it is why remote-control
+mode is the right tool: it takes the planner's caution out of the loop entirely.
 
-The threshold in question fails in **two different ways**, and **only in one direction**:
+### What this means for expectations
 
-| Mode | What it looks like | What it means physically |
-|---|---|---|
-| **Beach** | Rides up, strands on the crest, wheels spinning | High-centring. The chassis or the mop assembly grounds out on top before the drive wheels regain purchase. |
-| **Refusal** | Hits the lip and turns away without committing | The robot's own bumper/cliff logic aborts the attempt before the climb starts. |
+We still cannot increase motor torque — no such property exists. But we do not
+need to: the threshold is demonstrably crossable by this robot at this
+threshold, because it used to happen daily. We only need to reproduce the
+conditions.
 
-Directional asymmetry means one side of the threshold has a steeper or squarer lip than the
-other — which is exactly the kind of thing per-direction learning captures for free.
+The one caveat worth keeping honest: if the furniture has left less clear floor
+on the living-room side than the robot needs for a run-up, no amount of software
+recovers that. The engine detects and reports exactly this case rather than
+grinding away at it — see `could not open Nm of run-up` in the notes. If that
+is what comes back, the answer is to move the furniture a little or add a ramp,
+and we will know within one calibration run.
 
-Three consequences, and they shape everything below:
+## 2. What we control
 
-**1. The two modes want partially opposite remedies.** A refusal is helped by a square,
-perpendicular, committed approach with run-up. A beach is often helped by the *opposite* —
-a slightly oblique entry, so the wheels meet the lip sequentially and the robot pitches over
-it rather than lifting flat and grounding out in the middle. A single hand-tuned rule cannot
-serve both. This is the strongest argument for the learning approach: record which mode
-occurred, and let per-spot, per-direction statistics discover which entry geometry works
-*here*, rather than encoding a guess.
+There is no throttle. Remote control gives direction commands only:
 
-**2. Outcomes must be typed, not boolean.** `crossed | beached | refused | faulted` — not
-`success | failure`. A beach and a refusal at the same spot are different evidence and must
-update different arms of the policy. This is a schema decision that is painful to retrofit,
-so it goes in from the first commit.
+| Action | Address |
+|---|---|
+| enter remote mode | `6 / A2` |
+| forward / back / left / right | `6 / A9` `6 / A12` `6 / A10` `6 / A11` |
+| stop / exit | `6 / A13` `6 / A14` |
+| resume the interrupted clean | `6 / A1` |
 
-**3. Beaching needs an escape routine, not persistence.** When high-centred, continuing to
-drive forward spins the wheels against no traction. It achieves nothing, and on this model it
-is a plausible route to the reported mop-bracket detachment, as well as needless drive-motor
-load. So:
+So momentum has exactly two levers:
 
-> **Beach detection is a hard interrupt.** If the pose is straddling the gate line and static
-> for more than ~2 s, stop driving forward immediately, reverse out along the entry vector,
-> and only then consider another attempt at a different spot.
+1. **Run-up distance** — how far back the robot starts before it meets the lip.
+   This is the dominant parameter and the one worth calibrating.
+2. **An unbroken forward command stream** — if the firmware needs the direction
+   command re-issued, gaps between commands mean coasting. `command_interval`
+   controls the cadence; `--no-reissue` covers the case where one command drives
+   continuously. Which it is gets settled by `tools/probe.py --remote-test`.
 
-Discriminating the two modes is straightforward with the geometry we already have — take the
-signed distance from the gate line:
+Secondary levers, each a single property write and each worth an A/B once the
+main one works: mop water off (`2/p9`), suction (`2/p8`), and sweep-only mode
+(`2/p3 = 1`) in case it unloads the mop assembly — relevant here because the
+assembly sits at the back and the reported S20+ failure mode is the mop bracket
+detaching on exactly this kind of obstacle.
 
-- **refusal** — motion stops while the signed distance is still clearly negative (short of
-  the line), usually followed by a heading change;
-- **beach** — signed distance sits near zero (straddling) and the pose freezes.
+## 3. The maneuver
 
-## 2. The primitives we have
-
-From service 6: `remote-control` (A2) to enter remote mode, then `start-remote-up` (A9),
-`-left` (A10), `-right` (A11), `-down` (A12), `stop-remote` (A13), `exit-remote` (A14).
-Status (2/p1) reports `7 Remote` while engaged; `continue-sweep` (6/A1) resumes the
-interrupted clean, backed by `sweep-break-switch` (6/p11).
-
-Position comes from `vacuum-position` (7/p4), polled locally.
-
-Three things about these primitives are **[UNVERIFIED]** and decide the shape of the feature.
-They are the first thing Phase 0 measures:
-
-1. **Position poll rate and latency.** A control loop needs ≥2 Hz with <500 ms lag. If the
-   property only updates once per second or is stale, the loop must run open-loop on timed
-   maneuvers instead of closed-loop on position.
-2. **Whether direction commands are continuous or impulse.** If `start-remote-up` means
-   "drive until stopped", we can build momentum. If it is a fixed nudge, run-up is impossible
-   and we fall back to spot-selection and retries.
-3. **Whether remote mode can be entered mid-clean and `continue-sweep` genuinely resumes**
-   the remaining plan rather than restarting the room.
-
-If (2) comes back "fixed nudge", the feature still works — it just loses the run-up strategy
-and leans on spot selection, which the data suggests is the bigger factor anyway.
-
-## 3. The gate model
-
-A **gate** is a user-drawn line segment on the map with a crossing direction:
-
-```python
-@dataclass
-class Gate:
-    id: str
-    map_id: int                 # permanent-map-id this is anchored to
-    a: Point; b: Point          # the threshold line, world coords (metres)
-    bidirectional: bool
-    approach_distance: float    # default 0.45 m — where the run-up starts
-    clearance: float            # default 0.20 m — how far past to call it crossed
-    max_attempts: int           # default 3
-    obliquity_set: list[float]  # entry angles to explore, e.g. [0°, ±12°, ±22°]
-    hard_direction: int | None  # set once learned; the side that actually fails
-    enabled: bool
-```
-
-Crossing points are sampled along `a→b`, inset from both ends so the robot never tries to
-climb at a door jamb. The policy's arms are the cross product
-`(spot × direction × obliquity)`; each carries a running record, typed by outcome.
-
-Because this threshold only fails in one direction, the engine should learn to stop
-intervening in the easy direction entirely — a gate that succeeds unassisted 20 times running
-in one direction drops to passive monitoring that way, and keeps its attempt budget for the
-side that needs it.
-
-## 4. The maneuver
+Implemented in `hub/crossing.py`.
 
 ```
-                    ┌─ triggered by ─────────────────────────────┐
-                    │  • predicted: pose heading toward a gate    │
-                    │  • reactive:  stall or fault near a gate    │
-                    └────────────────────────────────────────────┘
-                                     ↓
-  1. PAUSE            2/A6, confirm status → 5 Paused
-  2. SNAPSHOT         record pose, suction, water, mop type
-  3. PREPARE          mop water → Off (2/p9 = 0); suction → Full Speed (2/p8 = 4);
-                      optionally Sweep Mop Type → Sweep (2/p3 = 1) — see §6, this is the
-                      lever most likely to matter for beaching
-  4. ENTER REMOTE     6/A2, confirm status → 7 Remote
-  5. SELECT ARM       best-ranked (spot, obliquity) for this direction
-  6. BACK OFF         drive to approach_distance behind the gate, normal to a→b
-  7. ALIGN            rotate to the arm's target heading (gate normal ± obliquity), ±5°
-  8. DRIVE            issue -up repeatedly at the command refresh rate
-  9. EVALUATE         signed distance past the line > clearance   → CROSSED
-                      static & straddling the line (> 2 s)        → BEACHED, escape now
-                      static & short of the line  (> 3 s)         → REFUSED
- 10. ESCAPE           on BEACHED: stop, reverse along the entry vector until clear
- 11. RETRY            next-best arm, up to max_attempts; then give up and flag the gate
- 12. RESTORE          exit-remote (6/A14), restore settings, continue-sweep (6/A1)
+  1. CHECK        refuse unless the robot is already staged near the gate
+  2. SNAPSHOT     save suction, water, mop mode
+  3. PREPARE      water off, suction full (optionally sweep-only)
+  4. PAUSE        if a clean is running
+  5. ENTER REMOTE 6/A2, confirm status -> 7 Remote
+  6. STAGE        move to exactly `runup` metres back from the line --
+                  reversing if too close, creeping forward if too far back
+  7. ALIGN        rotate onto the crossing heading, within 5 deg
+  8. DRIVE        hold forward, sampling pose, and classify how it ends:
+                    past the line by `clearance`        -> CROSSED
+                    climbed on, then stalled            -> BEACHED
+                    stalled without ever reaching it    -> REFUSED
+                    fault / out of time                 -> FAULTED / TIMEOUT
+  9. ESCAPE       on BEACHED, stop and reverse clear. Never push through.
+ 10. RESTORE      exit remote, restore settings, resume the clean
 ```
 
-Every step is guarded. The engine holds a hard watchdog: if anything takes longer than a
-configured ceiling, or the robot reports a fault, it unconditionally runs step 12 and reports
-failure. **The robot must never be left parked in remote mode by a crashed engine** — that
-is the single worst failure mode of this design, so the restore path is written first and
-tested with injected faults.
+Step 6 matters more than it looks. Staging to the *exact* run-up distance in
+both directions is what makes the calibration sweep honest — parking further
+back than requested would silently give every short attempt a long run-up, and
+the sweep would report a shorter working distance than the robot really needs.
 
-## 5. Stall detection
+### Classification
 
-A stall near a gate is: status is `4 Sweeping`, and the position has stayed inside a small
-radius (~8 cm) for longer than a threshold (~4 s), and the pose is within ~0.6 m of a gate
-line. Fault codes (2/p2, plus `fault-index` 6/p13) are a second, faster trigger once we have
-catalogued which codes the robot emits when it beaches itself — Phase 0 should deliberately
-strand it on the threshold a few times and record what it reports.
+Beaching and refusal are told apart by **whether the robot ever climbed onto the
+lip**, not by where it happens to be sitting when it stops — a refusal can stop
+close to the line too. `best_signed >= lip_reach` means it got on; stalling
+after that is beaching, stalling without it is a refusal. The two want different
+responses, so the distinction earns its keep.
 
-## 6. The part that makes this better than the stock app
+### Safety invariants
 
-**Per-spot learning.** Every attempt writes a row:
+1. **The robot is never left in remote mode.** Teardown runs in a `finally`,
+   and again as a belt-and-braces check afterwards. Tested by killing telemetry
+   mid-run.
+2. **Beaching is never pushed through.** High-centred, driving on just spins the
+   wheels against no traction — pointless, hard on the drive motors, and a
+   plausible route to the mop-bracket problem. Detection triggers an immediate
+   reverse escape.
+3. **Takeover only happens next to the gate.** There is no path planning here,
+   so the engine refuses to drive a robot that is not already staged rather than
+   blunder across a room that now has furniture in it.
+
+## 4. Calibration is the deliverable
+
+The single most useful number is **the shortest run-up that reliably crosses**.
+Shortest, not merely sufficient — because the run-up has to fit in whatever
+space the furniture left.
+
+```
+python3 tools/cross.py hall --calibrate
+```
+
+This sweeps ascending run-up distances and stops at the first that works. Set
+that (plus a little margin) as `approach_distance` in `gates.toml`.
+
+## 5. Later: making it automatic and self-improving
+
+Once a crossing works reliably by hand, the engine gets wired to a watcher that
+notices the robot stalling near the gate during a normal clean and intervenes
+on its own. At that point the attempt log becomes useful:
 
 ```sql
 CREATE TABLE crossing_attempts (
   id INTEGER PRIMARY KEY,
-  gate_id TEXT, spot_index INTEGER, direction INTEGER,
-  approach_heading_err REAL, entry_speed_proxy REAL,
-  mop_water INTEGER, suction INTEGER,
-  entry_obliquity REAL,     -- 0 = square to the lip; the beach/refusal trade-off
-  outcome TEXT,             -- crossed | beached | refused | faulted
-  duration_ms INTEGER, ts INTEGER
+  gate_id TEXT, lateral REAL, runup REAL, obliquity REAL,
+  water INTEGER, suction INTEGER, sweep_mop_type INTEGER,
+  outcome TEXT,            -- crossed | beached | refused | faulted | timeout
+  reached REAL, duration_ms INTEGER, ts INTEGER
 );
 ```
 
-Spot ranking is a Beta posterior over success rate (Thompson sampling, a few lines of code —
-no ML stack). The arms are `(spot, direction, obliquity bucket)`, which is what lets the
-policy resolve the conflict in §1a empirically: if square entry keeps beaching at this
-threshold, the oblique arms win on their own, without anyone deciding in advance.
+Ranking over `(lateral, runup)` by a Beta posterior — Thompson sampling, a few
+lines, no ML stack — lets the engine settle on the spot and run-up that actually
+work at this threshold, and adapt if the furniture moves again. Thresholds are
+not uniform along their width, and this is exactly the knowledge the stock
+firmware throws away after every run.
 
-The first few runs explore the threshold; after that the engine goes straight to the geometry
-that actually works, in the direction that actually needs help. Thresholds are not uniform,
-and this is precisely the knowledge the stock firmware throws away after every run.
-
-Secondary levers worth A/B-ing once the harness exists, since each is one property write:
-mop water off vs. on, suction level, and `Sweep Mop Type` (2/p3) set to `1 Sweep` — if that
-retracts or unloads the mop assembly it may measurably improve clearance, which also
-addresses the reported S20+ issue of the mop bracket detaching on thresholds.
-
-## 7. Defensive complement
-
-Gate Assist is opportunistic. The robust complement is **orchestration**: instead of letting
-the robot free-roam the whole flat and discover the threshold mid-plan, the hub runs rooms
-in an explicit sequence (2/A13 per room) and performs a deliberate assisted crossing between
-them. Fewer unplanned encounters, and every crossing happens under supervision with a known
-approach. Build Gate Assist first, then layer this on.
+Worth building only after the manual crossing is solved. The parameters come
+first; the automation is the easy part.

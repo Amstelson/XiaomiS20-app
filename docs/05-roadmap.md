@@ -19,6 +19,10 @@ Run the probe script from `04-dev-environment.md`. Deliverables:
 If `wifi_sn` cannot be found, the map feature needs a different approach and Phase 2 is
 re-planned — better to learn that in week one.
 
+> **Revised priority.** Threshold crossing moved ahead of maps, and carpet
+> moved to the back, at the user's direction. Phases 1 and 4 below are
+> substantially built already -- see the repository root.
+
 ## Phase 1 — Hub skeleton + control
 
 - Transport layer, `spec.py` constants, typed device facade

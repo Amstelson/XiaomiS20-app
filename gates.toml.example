@@ -1,0 +1,26 @@
+# Copy to gates.toml. Generate the numbers by driving the robot with
+# tools/jog.py: press `m` at each end of the threshold, then `g`.
+#
+# a, b        the two ends of the threshold, in world metres
+# from_side   any point on the side the robot crosses FROM. This is what makes
+#             "across" unambiguous -- for the hall doorway that is a point in
+#             the living room, because that is the direction that fails.
+
+[[gate]]
+id = "hall"
+name = "Living room -> hall"
+a = [2.100, 3.400]
+b = [2.100, 4.250]
+from_side = [1.200, 3.800]
+
+# Run-up distance. Start with whatever --calibrate finds is the shortest that
+# works, then leave a little margin.
+approach_distance = 0.55
+
+# How far past the threshold counts as crossed.
+clearance = 0.20
+
+# Keeps attempts away from the door jambs.
+edge_inset = 0.12
+
+notes = "Curved aluminium with a slight ramp. Hall -> living room is fine."

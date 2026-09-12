@@ -23,11 +23,20 @@ The hub speaks **UDP 54321 directly to the robot**, so container networking matt
 
 ## Observed threshold behaviour (the design input)
 
-The problem threshold exhibits **all three** of:
+One doorway: living room to hall. Curved aluminium with a slight ramp.
 
-1. the robot rides up and **beaches** on top, wheels spinning;
-2. the robot hits it and **turns away** without committing;
-3. it **only fails in one direction**.
+- **Hall -> living room: always fine.**
+- **Living room -> hall: fails.** Hesitates at the lip, crosses too gently,
+  strands halfway.
+- **It used to work.** The robot would back off, build speed and carry over on
+  momentum, entirely by itself.
+- **It stopped after furniture was built around the opening.**
 
-This is the single most useful piece of information in the project, and it is why Gate Assist
-is built the way it is. See `03-gate-assist.md`.
+That history is the most valuable fact in the project: the capability exists in
+the firmware and has been demonstrated at this exact threshold. The work is to
+reproduce the conditions, not to invent a maneuver. See `03-gate-assist.md`.
+
+| # | Decision | Rationale |
+|---|---|---|
+| D5 | **Threshold crossing is priority one. Maps second. Carpet later.** | User's call, and the threshold is the thing that breaks cleaning runs today. |
+| D6 | **Run-up distance is the parameter to calibrate.** | Remote control offers no throttle, so run-up distance and an unbroken command stream are the only levers on momentum. |

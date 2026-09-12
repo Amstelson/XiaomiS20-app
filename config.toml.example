@@ -1,0 +1,14 @@
+# Copy to config.toml and fill in. config.toml is gitignored -- the token is
+# device material and must not be committed.
+#
+# Get the token with Xiaomi-cloud-tokens-extractor:
+#   https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor
+
+[robot]
+ip = "192.168.1.42"
+token = "0123456789abcdef0123456789abcdef"
+
+# Seconds to wait for a reply.
+timeout = 5
+# Minimum seconds between outbound calls. Newer firmware dislikes fast polling.
+min_interval = 0.10
