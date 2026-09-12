@@ -1,0 +1,18 @@
+[tool.pytest.ini_options]
+# Collect only from tests/, so a stray copy of the project sitting inside the
+# working tree -- a second clone, a backup directory -- can never be collected
+# alongside the real one. Without this, two same-named test packages collide on
+# import and every module fails with "import file mismatch".
+testpaths = ["tests"]
+
+# Put the repository root on sys.path so `import hub` works without installing
+# the package and without needing tests/__init__.py. Keeping tests/ a plain
+# directory rather than a package is what stops the name collision above.
+pythonpath = ["."]
+
+norecursedirs = [
+    ".git", ".venv", "venv", "__pycache__", "fixtures",
+    "build", "dist", "node_modules",
+]
+
+addopts = "--strict-markers"
