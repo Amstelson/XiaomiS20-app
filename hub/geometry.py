@@ -127,7 +127,8 @@ class Gate:
     def crossing_heading(self) -> float:
         """Heading, in degrees, that drives straight across the threshold."""
         n = self.normal
-        return math.degrees(math.atan2(n.y, n.x))
+        # The `+ 0.0` collapses negative zero, which otherwise prints as "-0".
+        return math.degrees(math.atan2(n.y, n.x)) + 0.0
 
     # -- queries -------------------------------------------------------------
 

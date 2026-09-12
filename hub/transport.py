@@ -1,8 +1,8 @@
-"""miIO/MIoT transport to the robot over the local network (UDP 54321).
+"""MIoT transport to the robot over the local network (UDP 54321).
 
-Thin wrapper over python-miio's protocol layer. Deliberately uses the raw
-``send()`` calls rather than the higher-level helpers so that the exact MIoT
-envelopes -- and the per-property result codes -- stay visible.
+Builds MIoT envelopes on top of `hub.miio_protocol`, keeping the exact payloads
+-- and the per-property result codes -- visible rather than hidden behind a
+library's mapping layer.
 
 Two safety properties are built in and every caller gets them for free:
 
@@ -19,6 +19,7 @@ import threading
 import time
 from typing import Any
 
+from .miio_protocol import MiioDeviceError, MiioProtocol, MiioProtocolError
 from .spec import Action, Prop
 
 _LOG = logging.getLogger(__name__)
@@ -50,19 +51,22 @@ class Transport:
         min_interval: float = 0.10,
         dry_run: bool = False,
     ) -> None:
-        try:
-            from miio import MiotDevice
-        except ImportError as exc:  # pragma: no cover - environment dependent
-            raise TransportError(
-                "python-miio is not installed. Run: pip install -r requirements.txt"
-            ) from exc
-
         self.ip = ip
         self.dry_run = dry_run
         self._min_interval = min_interval
         self._last_call = 0.0
         self._lock = threading.Lock()
-        self._dev = MiotDevice(ip, token, lazy_discover=False, timeout=timeout)
+        self._proto = MiioProtocol(ip, token, timeout=timeout)
+
+    @property
+    def device_id(self) -> int | None:
+        return self._proto.device_id
+
+    def handshake(self) -> None:
+        """Establish the device id and clock. Raises if the robot is unreachable."""
+        with self._lock:
+            self._throttle()
+            self._proto.handshake()
 
     # -- plumbing ------------------------------------------------------------
 
@@ -76,7 +80,12 @@ class Transport:
         with self._lock:
             self._throttle()
             _LOG.debug("-> %s %s", command, payload)
-            result = self._dev.send(command, payload)
+            try:
+                result = self._proto.send(command, payload)
+            except MiioDeviceError as exc:
+                raise MiotError(command, exc.code or -1, exc.error) from exc
+            except MiioProtocolError as exc:
+                raise TransportError(str(exc)) from exc
             _LOG.debug("<- %s", result)
             return result
 

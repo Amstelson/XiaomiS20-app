@@ -54,6 +54,7 @@ class Outcome(str, Enum):
     TIMEOUT = "timeout"
     NOT_STAGED = "not-staged"
     ABORTED = "aborted"
+    DRY_RUN = "dry-run"
 
     @property
     def is_success(self) -> bool:
@@ -165,6 +166,7 @@ class CrossingEngine:
         confirm: Callable[[str], bool] | None = None,
         clock: Callable[[], float] | None = None,
         sleep: Callable[[float], None] | None = None,
+        dry_run: bool | None = None,
     ) -> None:
         self.vac = vacuum
         self.gate = gate
@@ -176,6 +178,9 @@ class CrossingEngine:
         self._now = clock or time.monotonic
         self._sleep = sleep or time.sleep
         self._deadline = 0.0
+        if dry_run is None:
+            dry_run = bool(getattr(getattr(vacuum, "t", None), "dry_run", False))
+        self.dry_run = dry_run
 
     # -- helpers -------------------------------------------------------------
 
@@ -429,6 +434,44 @@ class CrossingEngine:
 
     # -- public API ----------------------------------------------------------
 
+    def plan(
+        self, pose: Pose, lateral: float, runup: float, obliquity: float
+    ) -> list[str]:
+        """Describe what an attempt would do, without doing any of it.
+
+        Checks the gate definition against where the robot actually is, which
+        is the useful thing a dry run can verify -- a dry run cannot rehearse
+        the maneuver itself, because nothing moves and the pose never changes.
+        """
+        gate = self.gate
+        signed = gate.signed_distance(pose.point)
+        staging = gate.staging_point(lateral, runup)
+        target = gate.target_point(lateral)
+        heading = gate.approach_heading(obliquity)
+        move = "reverse" if signed > -runup else "creep forward"
+        return [
+            f"robot is {abs(signed):.2f} m "
+            f"{'short of' if signed < 0 else 'past'} the threshold, "
+            f"{gate.lateral_offset(pose.point):+.2f} m off centre",
+            f"would {move} to staging point "
+            f"({staging.x:.2f}, {staging.y:.2f}), {runup:.2f} m back",
+            f"would turn to {heading:+.0f} deg "
+            f"(currently {pose.heading:+.0f} deg, "
+            f"{gate.heading_error(pose, obliquity):+.0f} deg to correct)",
+            f"would drive to ({target.x:.2f}, {target.y:.2f}), "
+            f"{runup + gate.clearance:.2f} m of travel in all",
+            "settings: "
+            + ", ".join(
+                f"{label} {value.name.lower()}"
+                for label, value in (
+                    ("water", self.params.water),
+                    ("suction", self.params.suction),
+                    ("mode", self.params.sweep_mop_type),
+                )
+                if value is not None
+            ),
+        ]
+
     def attempt(
         self,
         lateral: float = 0.0,
@@ -470,6 +513,11 @@ class CrossingEngine:
             if self.gate.is_crossed(pose.point):
                 attempt.outcome = Outcome.CROSSED
                 attempt.notes.append("already on the far side")
+                return attempt
+
+            if self.dry_run:
+                attempt.outcome = Outcome.DRY_RUN
+                attempt.notes.extend(self.plan(pose, lateral, runup, obliquity))
                 return attempt
 
             if self._confirm and not self._confirm(

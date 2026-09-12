@@ -162,6 +162,14 @@ def main() -> int:
     if args.dry_run:
         print("  DRY RUN -- reads happen, nothing is written and nothing moves.")
 
+    if args.dry_run:
+        result = engine.attempt(args.lateral)
+        print("\nPlan:")
+        for note in result.notes:
+            print(f"  {note}")
+        print("\nNothing was sent. Re-run without --dry-run to do it.")
+        return 0
+
     if args.calibrate:
         print(f"\nCalibrating run-up over {args.sweep} m, shortest first.")
         print("Re-park the robot on the starting side between attempts if it crosses.\n")

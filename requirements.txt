@@ -1,5 +1,7 @@
-# Local control of the robot (miIO/MIoT over UDP 54321).
-python-miio>=0.6.0
+# AES-128-CBC for the miIO packet protocol (see hub/miio_protocol.py).
+# pycryptodome is chosen for its universal wheels -- no Rust, no cffi, no
+# compiler needed on any platform or Python version.
+pycryptodome>=3.19
 
 # Testing.
-pytest>=8.0
+pytest>=7.0

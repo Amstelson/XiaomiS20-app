@@ -271,6 +271,51 @@ def test_blocked_runup_is_reported_as_such():
     assert "run-up" in " ".join(result.notes)
 
 
+# -- dry run -----------------------------------------------------------------
+
+
+def test_dry_run_describes_the_plan_without_moving():
+    engine, vac, robot, _ = build()
+    engine.dry_run = True
+    before = (robot.x, robot.y, robot.heading)
+    result = engine.attempt(runup=0.55)
+    assert result.outcome is Outcome.DRY_RUN
+    assert (robot.x, robot.y, robot.heading) == before
+    assert "enter_remote" not in vac.calls
+    assert any("staging point" in n for n in result.notes)
+    assert any("would drive to" in n for n in result.notes)
+    settings = next(n for n in result.notes if n.startswith("settings:"))
+    assert "water off" in settings and "suction full_speed" in settings
+
+
+def test_dry_run_still_refuses_when_not_staged():
+    engine, _, _, _ = build(start=(-4.0, 2.0, 0.0))
+    engine.dry_run = True
+    assert engine.attempt(runup=0.5).outcome is Outcome.NOT_STAGED
+
+
+def test_dry_run_is_inferred_from_the_transport():
+    gate, model = make_doorway()
+    robot = SimRobot(threshold=model, x=-0.3, y=0.0, heading=0.0)
+    vac = SimVacuum(robot)
+
+    class FakeTransport:
+        dry_run = True
+
+    vac.t = FakeTransport()
+    clock = VirtualClock(robot)
+    engine = CrossingEngine(
+        vac,
+        gate,
+        PoseReader(vac.position_raw, PositionFormat(1.0, True)),
+        CrossingParams(poll_interval=0.05),
+        clock=clock.now,
+        sleep=clock.sleep,
+    )
+    assert engine.dry_run is True
+    assert engine.attempt(runup=0.5).outcome is Outcome.DRY_RUN
+
+
 # -- operator confirmation ---------------------------------------------------
 
 

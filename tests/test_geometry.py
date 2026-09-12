@@ -43,6 +43,10 @@ def test_angle_diff_takes_short_way_round():
 # -- orientation -------------------------------------------------------------
 
 
+def test_crossing_heading_never_prints_as_negative_zero():
+    assert not f"{make_gate().crossing_heading:+.0f}".startswith("-0")
+
+
 def test_normal_points_away_from_start_side():
     gate = make_gate()
     assert gate.normal.x == pytest.approx(1.0)

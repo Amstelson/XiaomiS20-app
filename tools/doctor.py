@@ -71,16 +71,23 @@ def main() -> int:
 
     # 2. Dependencies -------------------------------------------------------
     try:
-        import miio  # noqa: F401
+        from hub.miio_protocol import encrypt_payload
 
-        check("python-miio installed", PASS, f"version {miio.__version__}")
-    except ImportError:
+        encrypt_payload("00" * 16, b"probe")
+        try:
+            import Crypto
+
+            backend = f"pycryptodome {Crypto.__version__}"
+        except ImportError:
+            import cryptography
+
+            backend = f"cryptography {cryptography.__version__}"
+        check("AES backend", PASS, backend)
+    except Exception as exc:  # noqa: BLE001
         check(
-            "python-miio installed",
+            "AES backend",
             FAIL,
-            "pip install -r requirements.txt\n"
-            "If a dependency fails to build, say so -- the miIO packet protocol\n"
-            "is small enough to implement directly and drop the dependency.",
+            f"{exc}\npip install -r requirements.txt",
         )
         return 1
 
@@ -124,12 +131,22 @@ def main() -> int:
         )
 
     # 5. Handshake ----------------------------------------------------------
-    from miio import MiotDevice
+    from hub import spec
+    from hub.device import Vacuum
+    from hub.transport import Transport
 
-    device = MiotDevice(cfg.ip, cfg.token, lazy_discover=False, timeout=cfg.timeout)
+    transport = Transport(
+        cfg.ip, cfg.token, timeout=cfg.timeout, min_interval=cfg.min_interval
+    )
+    vac = Vacuum(transport)
+
     try:
-        device.send_handshake()
-        check("miIO handshake (UDP 54321)", PASS, "device answered and clock synced")
+        transport.handshake()
+        check(
+            "miIO handshake (UDP 54321)",
+            PASS,
+            f"device id {transport.device_id}, clock synced",
+        )
     except Exception as exc:  # noqa: BLE001
         check(
             "miIO handshake (UDP 54321)",
@@ -141,14 +158,6 @@ def main() -> int:
         return 1
 
     # 6. Token --------------------------------------------------------------
-    from hub import spec
-    from hub.device import Vacuum
-    from hub.transport import Transport
-
-    transport = Transport(
-        cfg.ip, cfg.token, timeout=cfg.timeout, min_interval=cfg.min_interval
-    )
-    vac = Vacuum(transport)
     try:
         model = transport.get(spec.DEVICE_MODEL)
         status = vac.status_name()

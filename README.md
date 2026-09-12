@@ -32,6 +32,13 @@ pip install -r requirements.txt
 cp config.toml.example config.toml    # add your robot's IP and token
 ```
 
+The only runtime dependency is `pycryptodome`, which ships universal wheels, so
+no compiler is needed on any platform. The miIO protocol is implemented directly
+in `hub/miio_protocol.py` rather than via python-miio -- its released version
+requires `netifaces` (no wheels past CPython 3.9) and `micloud` (sdist-only,
+with a setup.py that breaks on modern setuptools), so it will not install on a
+current Python without a build toolchain.
+
 The token comes from your Mi account, once, with
 [Xiaomi-cloud-tokens-extractor](https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor).
 `config.toml`, `gates.toml` and `fixtures/` are gitignored — they hold device
@@ -97,13 +104,13 @@ Then put that number in `gates.toml` as `approach_distance`, and:
 
 ```bash
 python3 tools/cross.py hall            # one crossing
-python3 tools/cross.py hall --dry-run  # rehearse, nothing moves
+python3 tools/cross.py hall --dry-run  # check the gate against the live pose
 ```
 
 ## Working without the robot
 
 ```bash
-python3 -m pytest            # 95 tests, no hardware needed
+python3 -m pytest            # 132 tests, no hardware needed
 python3 tools/simulate.py    # run the maneuver against the simulator
 ```
 
@@ -117,14 +124,15 @@ robot into a door frame.
 
 ```
 hub/
-  spec.py        every siid/piid/aiid for this model, named
-  transport.py   miIO/MIoT over UDP 54321, with dry-run and rate limiting
-  device.py      typed facade: status, settings, cleaning, remote control
-  telemetry.py   pose parsing (format unconfirmed, so deliberately tolerant)
-  geometry.py    gate maths -- pure, and tested exhaustively
-  crossing.py    the crossing maneuver state machine
-  simulator.py   differential drive + threshold model, for offline development
-  gates.py       gates.toml loading
+  spec.py           every siid/piid/aiid for this model, named
+  miio_protocol.py  the miIO packet protocol: handshake, AES-CBC, checksums
+  transport.py      MIoT envelopes, with dry-run and rate limiting
+  device.py         typed facade: status, settings, cleaning, remote control
+  telemetry.py      pose parsing (format unconfirmed, so deliberately tolerant)
+  geometry.py       gate maths -- pure, and tested exhaustively
+  crossing.py       the crossing maneuver state machine
+  simulator.py      differential drive + threshold model, for offline development
+  gates.py          gates.toml loading
 tools/
   doctor.py      is this host a good place to drive the robot from?
   probe.py       Phase 0 discovery
