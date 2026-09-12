@@ -1,0 +1,27 @@
+# Secrets and device-identifying material
+secrets/
+*.token
+.env
+.env.*
+credentials.json
+
+# Recorded robot data — contains MAC, device id, owner id, wifi_sn (map AES key inputs)
+fixtures/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*_pb2.py
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
