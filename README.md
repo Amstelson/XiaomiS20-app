@@ -63,6 +63,18 @@ that decides whether closed-loop control works from where you are.
 
 ## Use it in this order
 
+**0. Find the robot on your network.**
+
+```bash
+python3 tools/discover.py                        # broadcast
+python3 tools/discover.py --scan 192.168.1.0/24  # if broadcast is filtered
+```
+
+No account needed -- every miIO device answers a fixed handshake packet with
+its device id, so this gets you the IP and proves UDP 54321 is reachable before
+you have a token. Some devices leak their token in the reply; most current
+firmware does not, so expect to still need it from your Mi account.
+
 **1. Check we can talk to the robot at all.**
 
 ```bash
@@ -110,7 +122,7 @@ python3 tools/cross.py hall --dry-run  # check the gate against the live pose
 ## Working without the robot
 
 ```bash
-python3 -m pytest            # 132 tests, no hardware needed
+python3 -m pytest            # 147 tests, no hardware needed
 python3 tools/simulate.py    # run the maneuver against the simulator
 ```
 
@@ -132,8 +144,10 @@ hub/
   geometry.py       gate maths -- pure, and tested exhaustively
   crossing.py       the crossing maneuver state machine
   simulator.py      differential drive + threshold model, for offline development
+  discovery.py      LAN discovery via the miIO handshake
   gates.py          gates.toml loading
 tools/
+  discover.py    find the robot on the LAN, no account needed
   doctor.py      is this host a good place to drive the robot from?
   probe.py       Phase 0 discovery
   jog.py         manual keyboard control + gate capture
