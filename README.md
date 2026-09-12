@@ -39,8 +39,11 @@ requires `netifaces` (no wheels past CPython 3.9) and `micloud` (sdist-only,
 with a setup.py that breaks on modern setuptools), so it will not install on a
 current Python without a build toolchain.
 
-The token comes from your Mi account, once, with
-[Xiaomi-cloud-tokens-extractor](https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor).
+The token comes from your Mi account, once:
+
+```bash
+python3 tools/cloud_devices.py
+```
 `config.toml`, `gates.toml` and `fixtures/` are gitignored — they hold device
 material.
 
@@ -122,7 +125,7 @@ python3 tools/cross.py hall --dry-run  # check the gate against the live pose
 ## Working without the robot
 
 ```bash
-python3 -m pytest            # 147 tests, no hardware needed
+python3 -m pytest            # 166 tests, no hardware needed
 python3 tools/simulate.py    # run the maneuver against the simulator
 ```
 
@@ -145,9 +148,11 @@ hub/
   crossing.py       the crossing maneuver state machine
   simulator.py      differential drive + threshold model, for offline development
   discovery.py      LAN discovery via the miIO handshake
+  cloud.py          Xiaomi account API: tokens now, map blobs later
   gates.py          gates.toml loading
 tools/
   discover.py    find the robot on the LAN, no account needed
+  cloud_devices.py  list account devices and their tokens
   doctor.py      is this host a good place to drive the robot from?
   probe.py       Phase 0 discovery
   jog.py         manual keyboard control + gate capture

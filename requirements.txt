@@ -1,7 +1,11 @@
-# AES-128-CBC for the miIO packet protocol (see hub/miio_protocol.py).
+# AES-128-CBC for the miIO packet protocol, and RC4 for the cloud API.
 # pycryptodome is chosen for its universal wheels -- no Rust, no cffi, no
 # compiler needed on any platform or Python version.
 pycryptodome>=3.19
+
+# HTTP session handling for the Xiaomi account API (tools/cloud_devices.py).
+# Only needed for cloud access: local control works without it.
+requests>=2.28
 
 # Testing.
 pytest>=7.0
